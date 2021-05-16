@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Document</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.7.1/dist/leaflet.css"
+    integrity="sha512-xodZBNTC5n17Xt2atTPuE1HxjVMSvLVW9ocqUKLsCC5CXdbqCmblAshOMAS6/keqq/sMZMZ19scR4PsZChSR7A=="
+    crossorigin=""/>
+    <script src="https://unpkg.com/leaflet@1.7.1/dist/leaflet.js"
+    integrity="sha512-XQoYMqMTK8LvdxXYG3nZ448hOEQiglfqkJs1NOQV44cWnUrBc8PkAOcXy20w0vlaXaVUearIOBhiXZ5V3ynxwA=="
+    crossorigin=""></script>
+
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js" integrity="sha256-/xUj+3OJU5yExlq6GSYGSHk7tPXikynS7ogEvDej/m4=" crossorigin="anonymous"></script>
+    <style>
+        body { 
+            margin: 0;
+            padding: 0;
+        }
+        #map { 
+            width: 800px;
+            height: 800px;
+        }
+
+        .moveBtn {
+            display: inline-block;
+            margin: 40px;
+        }
+    </style>
+
+</head>
+<body>
+    <div id="map"></div>
+    <a id="move_1" class="moveBtn" href="javascript:">path 1</a>
+    <a id="move_2" class="moveBtn" href="javascript:">path 2</a>
+    <script src="sha1.js"></script>
+    <script>
+
+        //https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Light_Gray_Base/MapServer/tile/{z}/{y}/{x}
+
+        var mymap = L.map('map').setView([24.99819818, 121.4951329], 14);
+        L.tileLayer('',{
+            minZoom: 14,
+            maxZoom: 16,
+            id: 'mapbox/streets-v11',
+        }).addTo(mymap);
+
+        //改變中心點
+        document.getElementById('move_1').onclick = function(){
+            mymap.setView(new L.LatLng(25.022995, 121.451417), 14);
+        }
+        document.getElementById('move_2').onclick = function(){
+            mymap.setView(new L.LatLng(25.020000, 121.460000), 14);
+        }
+
+
+        //帶入公車站牌資料
+        let p1 = fetch('https://ptx.transportdata.tw/MOTC/v2/Bus/DisplayStopOfRoute/City/Taipei/307',{
+                    method: 'GET',
+                    headers:GetAuthorizationHeader()
+                });
+        let p2 = fetch("village.json")
+        let p3 = fetch('district.json')
+ 
+        Promise.all([p1,p2,p3])
+            .then(responses => Promise.all(responses.map(r => r.json())))
+            .then(data => {
+                console.log(data)
+                let busData = data[0];
+                let villages = data[1];
+                let districts = data[2];
+
+
+                let stopsAry = busData[0].Stops.map(function(obj){
+                    var rObj = {
+                        "StopName":obj.StopName.Zh_tw,
+                        "PositionLat":obj.StopPosition.PositionLat,
+                        "PositionLon":obj.StopPosition.PositionLon,
+                    }
+                    return rObj;
+                })
+
+                DrawBusPath(stopsAry)
+
+                // console.log(villages)
+                let Target_Villiage = [];
+                villages.features.forEach(el=>{
+                    if(el.properties['COUNTY'] === '臺北市' || el.properties['COUNTY'] === '新北市'){
+                        Target_Villiage.push(el)
+                    }
+                })
+                villages.features = [];
+                villages.features = Target_Villiage
+
+                let Target_District = [];
+                districts.features.forEach(el=>{
+                    if(el.properties['COUNTY'] === '臺北市' || el.properties['COUNTY'] === '新北市'){
+                        Target_District.push(el)
+                    }
+                })
+                districts.features = [];
+                districts.features = Target_District
+               
+
+                L.geoJSON(villages, {
+                    color: '#999999',
+                    weight:1,
+                }).addTo(mymap);
+
+                L.geoJSON(districts, {
+                    color: '#000000',
+                    weight:1,
+                }).addTo(mymap);
+
+
+                
+                /*
+                畫全台灣的村里地圖+行政區圖資料太大
+                loading太久
+                */
+                // L.geoJSON(villages, {
+                //     color: '#999',
+                //     weight:1,
+                // }).addTo(mymap);
+
+                // L.geoJSON(districts, {
+                //     color: '#000',
+                //     weight:2,
+                // }).addTo(mymap);
+
+            })
+
+
+
+        function GetAuthorizationHeader() {
+            var AppID = 'adb7d309f97440719c9ad8d648ac09a0';
+            var AppKey = 'f-X77D6fPqHMvcJ238NzSIrDX_4';
+
+            var GMTString = new Date().toGMTString();
+            var ShaObj = new jsSHA('SHA-1', 'TEXT');
+            ShaObj.setHMACKey(AppKey, 'TEXT');
+            ShaObj.update('x-date: ' + GMTString);
+            var HMAC = ShaObj.getHMAC('B64');
+            var Authorization = 'hmac username=\"' + AppID + '\", algorithm=\"hmac-sha1\", headers=\"x-date\", signature=\"' + HMAC + '\"';
+            console.log(Authorization)
+            console.log(GMTString)
+            return { 'Authorization': Authorization, 'X-Date': GMTString /*,'Accept-Encoding': 'gzip'*/}; //如果要將js運行在伺服器，可額外加入 'Accept-Encoding': 'gzip'，要求壓縮以減少網路傳輸資料量
+        }
+
+        function DrawBusPath(array){
+            var pointArray = array.map(function(el,i,arr){
+                if(i>0){
+                    var pointA = new L.LatLng(arr[i-1].PositionLat, arr[i-1].PositionLon);
+                    var pointB = new L.LatLng(arr[i].PositionLat, arr[i].PositionLon);
+                    return [pointA, pointB];
+                }
+            })
+            // console.log(pointArray)
+            pointArray.splice(0,1)
+
+            for(var i=0;i<pointArray.length;i++){
+                if(pointArray[i] !== 'undefined'){
+                    var firstpolyline = new L.Polyline(pointArray[i], {
+                        color: 'red',
+                        weight: 4,
+                        opacity: 1,
+                        smoothFactor: 1
+                    });
+                    firstpolyline.addTo(mymap);
+                }
+            }
+            
+            // firstpolyline.addTo(mymap);
+        }
+
+    </script>
+</body>
+</html>
